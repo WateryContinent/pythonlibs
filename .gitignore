@@ -2,3 +2,4 @@ clinicsystem/accounts.txt
 clinicsystem/changes.txt
 clinicsystem/patients.txt
 clinicsystem/__pycache__/encryption.cpython-314.pyc
+.DS_Store
