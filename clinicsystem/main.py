@@ -1,4 +1,6 @@
-# TODO - Implement patient stuff
+# TODO
+# Implement compiledailyreport()
+# Implement patient stuff
 
 import os
 import tkinter as tk
@@ -71,6 +73,7 @@ class VIPPatient(Patient):
         )
 
 accounts_file = os.path.join(os.path.dirname(__file__), "accounts.txt")
+patients_file = os.path.join(os.path.dirname(__file__), "patients.txt")
 
 if os.path.exists(accounts_file):
     with open(accounts_file, "r") as f:
@@ -100,6 +103,30 @@ if os.path.exists(accounts_file):
             accounts[user] = user_data 
             #current_user_classes = Nurse(user, "1", hours_worked, user_data)
             #print(current_user_classes) # debug, but could use this elsewhere as it looks nice - Ben.P
+
+if os.path.exists(patients_file):
+    with open(patients_file, "r") as f:
+        for line in f:
+            parts = line.strip().split("|")
+            # format: name|age|type|tier|visits|symptoms(comma separated)
+            name = parts[0]
+            age = int(parts[1])
+            ptype = parts[2]
+            tier = parts[3] if parts[3] != "None" else None
+            visits = int(parts[4])
+            symptoms = parts[5].split(",") if parts[5] else []
+
+            if ptype == "VIP":
+                patient_obj = VIPPatient(name, age, tier)
+            else:
+                patient_obj = Patient(name, age)
+            patient_obj.visits = visits
+
+            patientstoday[name] = {
+                "object": patient_obj,
+                "age": age,
+                "symptoms": symptoms
+            }
 
     
 def clear():
@@ -302,8 +329,9 @@ def loghours(username):
     try:
         hours = input("Enter the amount of hours you worked: ")
         hours = float(hours)
-    except Exception as e:
-        print(f"Could not update accounts file: {e}")
+    except Exception:
+        print(f"Please Enter a number.")
+        return
 
     loggedinstaff = MedicalStaff(current_user, "N1", hours)
     # debug
@@ -319,53 +347,181 @@ def loghours(username):
     update_file(current_user)
 
 def logpatients(username):
-    global loggedin, current_user, user
+    global loggedin, current_user, patientstoday
 
     if not loggedin or accounts[current_user]['kind'] != "Nurse":
         print("You are either not logged in or not logged into an account with permission to access this.")
         return
+    
     try:
-        patient = input("What was the patients name?: ")
-        age = int(input("What was the patients age?: "))
-        #patients = int(patients)
+        patient_name = input("What is the patient's name?: ")
+        age = int(input("What is the patient's age?: "))
+        is_vip = input("Is this a VIP patient? (Y/N): ").strip().upper()
+        
+        if is_vip == "Y":
+            tier = input("Enter VIP tier (Gold, Silver, Platinum): ").strip().upper()
+            patient = VIPPatient(patient_name, age, tier)
+            if tier == "GOLD" or tier == "SILVER" or tier == "PLATINUM":
+                print(tier) # debug
+                patient = VIPPatient(patient_name, age, tier)
+        else:
+            print("unkewl dood")
+            patient = Patient(patient_name, age)
+            tier = "None"  # for saving in file
+
+
+        symptoms = input("Enter symptoms (comma separated): ")
+        symptoms_list = [s.strip() for s in symptoms.split(",")]
+        
+        # Record patient in memory
+        patientstoday[patient_name] = {
+            "object": patient,
+            "age": age,
+            "symptoms": symptoms_list
+        }
+
+        # Increment nurse's patients attended
+        accounts[username]['patients_attended'] += 1
+        update_file(current_user)
+
+        # Save all patients to file
+        patients_file = os.path.join(os.path.dirname(__file__), "patients.txt")
+        with open(patients_file, "w") as f:
+            for name, data in patientstoday.items():
+                patient_obj = data["object"]
+                ptype = "VIP" if isinstance(patient_obj, VIPPatient) else "Regular"
+                tier_to_save = getattr(patient_obj, "tier", "None")
+                f.write(
+                    f"{patient_obj.name}|{data['age']}|{ptype}|{tier_to_save}|{patient_obj.visits}|{','.join(data['symptoms'])}\n"
+                )
+
+        print(f"Logged patient: {patient_name} ({ptype})")
+
     except Exception as e:
-        print(f"Could not update accounts file: {e}")
+        print(f"Could not log patient: {e}")
 
-    loggedinstaff = MedicalStaff(current_user, "N1", patient)
+def updatepatient():
+    global loggedin, current_user, patientstoday
 
-    symptoms = input("Enter symptoms (comma separated): ")
-    symptoms_list = symptoms.split(",")
+    if not loggedin or accounts[current_user]['kind'] != "Nurse":
+        print("You must be logged in as a Nurse to update patients.")
+        return
 
-    patientstoday[patient] = {
-        "age": age,
-        "symptoms": symptoms_list
-    }
+    if not patientstoday:
+        print("No patients registered.")
+        return
 
-    print(f"Logged '{patient}'")
-    password = pw
-    accounts[username]['patients_attended'] += 1
+    # Show patients
+    print("\nRegistered Patients:")
+    print("=" * 30)
+    for name in patientstoday:
+        print(f"- {name}")
+    print()
+
+    selected = input("Enter the name of the patient to update: ").strip()
+
+    if selected not in patientstoday:
+        print("Patient not found.")
+        return
+
+    patient_data = patientstoday[selected]
+    patient_obj = patient_data["object"]
+
+    # Increment visit count
+    patient_obj.visits += 1
+
+    # Increment nurse count
+    accounts[current_user]['patients_attended'] += 1
     update_file(current_user)
 
-def listpatients():
+    # Update symptoms
+    update_symptoms = input("Update symptoms? (Y/N): ").strip().upper()
+    if update_symptoms == "Y":
+        new_symptoms = input("Enter new symptoms (comma separated): ")
+        patient_data["symptoms"] = [s.strip() for s in new_symptoms.split(",")]
 
+    # Save all patients back to file
+    patients_file = os.path.join(os.path.dirname(__file__), "patients.txt")
+    with open(patients_file, "w") as f:
+        for name, data in patientstoday.items():
+            obj = data["object"]
+            ptype = "VIP" if isinstance(obj, VIPPatient) else "Regular"
+            tier = getattr(obj, "tier", "None")
+            symptoms = ",".join(data["symptoms"])
+
+            f.write(
+                f"{obj.name}|{data['age']}|{ptype}|{tier}|{obj.visits}|{symptoms}\n"
+            )
+
+    print(f"\nPatient '{selected}' updated successfully.")
+    print(f"Visits: {patient_obj.visits}")
+
+def top_nurse(typegui):
+    if typegui == "GUI":
+        #debug
+        #print("is gui")
+        nurses = [
+            (username, data)
+            for username, data in accounts.items()
+            if data["kind"] == "Nurse"
+        ]
+
+        if not nurses:
+            return None
+
+        return max(
+            nurses,
+            key=lambda n: n[1].get("patients_attended", 0)
+        )
+    else:
+        nurses = []
+
+        # collect only nurse accounts
+        for username, data in accounts.items():
+            if data["kind"] == "Nurse":
+                nurses.append((username, data))
+
+        if not nurses:
+            print("No nurses found.")
+            return
+
+        # find nurse with highest patients attended
+        best = max(
+            nurses,
+            key=lambda n: n[1].get("patients_attended", 0)
+        )
+
+        username, data = best
+
+        print("\nTop Performing Nurse")
+        print("=" * 30)
+        print(f"Name      : {username}")
+        print(f"Patients  : {data['patients_attended']}")
+        print(f"Hours     : {data['hours_worked']} hrs")
+
+def listpatients():
     if not loggedin:
         print("Please login to access this.")
         return
-    try:
-        if not patientstoday:
-            print("No patients registered.")
-            return
+    
+    if not patientstoday:
+        print("No patients registered.")
+        return
+    
+    for name, data in patientstoday.items():
+        patient_obj = data.get("object")
+        symptoms = ", ".join(data["symptoms"])
 
-        for name, data in patientstoday.items():
-            print("=" * 25)
-            print(f"Patient Name : {name}")
-            print(f"Age          : {data['age']}")
-            print("Symptoms     :")
+        print("=" * 40)
+        print(f"Name      : {patient_obj.name}")
+        print(f"Type      : {'VIP' if isinstance(patient_obj, VIPPatient) else 'Regular'}")
 
-            for symptom in data["symptoms"]:
-                print(f"  • {symptom}")
-    except Exception as e:
-        print(f"Could not update accounts file: {e}")
+        if isinstance(patient_obj, VIPPatient):
+            print(f"Tier      : {patient_obj.tier}")
+
+        print(f"Age       : {data['age']}")
+        print(f"Visits    : {patient_obj.visits}")
+        print(f"Symptoms  : {symptoms}")
 
 def whoami():
     if loggedin:
@@ -403,14 +559,45 @@ def opengui():
     root.title("Clinic App")
     root.geometry("640x480")
 
-    label = tk.Label(root, text=f"Logged in as: {current_user}", font=("Arial", 24))
-    label.pack(anchor="ne", pady=10)
+    # Logged in label
+    tk.Label(
+        root,
+        text=f"Logged in as: {current_user}",
+        font=("Arial", 24)
+    ).pack(anchor="nw", pady=10)
 
-    label = tk.Label(root, text=f"Hours Worked: {hoursworked}", font=("Arial", 24))
-    label.pack(anchor="ne", pady=10)
+    # Hours worked label
+    tk.Label(
+        root,
+        text=f"Hours Worked: {accounts[current_user]['hours_worked']} hrs",
+        font=("Arial", 24),
+        fg="green"
+        ).pack(pady=20)
 
-    finishorder = tk.Button(root, text="Finish Order", command=root.destroy(), height=10, width=10)
-    finishorder.pack(side="right", padx=20, pady=10)
+    # Top nurse label
+    top = top_nurse("GUI")
+    if top:
+        username, data = top
+        tk.Label(
+            root,
+            text=f"Top Nurse: {username} | Patients: {data['patients_attended']}",
+            font=("Arial", 20),
+            fg="green"
+        ).pack(pady=10)
+    else:
+        tk.Label(
+            root,
+            text="No nurses registered yet.",
+            font=("Arial", 20),
+            fg="red"
+        ).pack(pady=10)
+
+    # Finish button
+    tk.Button(
+        root,
+        text="Close GUI",
+        command=root.destroy
+    ).pack(side="bottom", padx=20, pady=10)
 
 def about():
         clear()
@@ -446,7 +633,10 @@ def main():
             case "logoff":
                 logoff()
             case "opengui":
+                top_nurse("GUI")
                 opengui()
+            case "topnurse":
+                top_nurse("NONGUI")
             case "loghours":
                 loghours(current_user)
             case "logpatient":
@@ -460,7 +650,7 @@ def main():
             case "exit":
                 exit()
             case "help":
-                print("Commands: createaccount, deleteaccount, listaccounts, login, logoff, loghours, logpatient, listpatient opengui, whoami, help, about, exit")
+                print("Commands: createaccount, deleteaccount, listaccounts, login, logoff, loghours, logpatient, listpatient opengui, topnurse, whoami, help, about, exit")
             case _:
                 print("Unknown command. Type 'help' for commands.")
 
